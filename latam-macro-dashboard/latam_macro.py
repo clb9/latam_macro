@@ -309,7 +309,8 @@ with col1:
         row=1, col=1
     )
     fig.add_trace(
-        go.Scatter(x=df.index, y=df['FX_Price'], name='FX Rate', line=dict(color='red'), yaxis='y2'),
+        go.Scatter(x=df.index, y=df['FX_Price'], name='FX Rate', line=dict(color='red')),
+        secondary_y=True,
         row=1, col=1
     )
     
@@ -326,7 +327,14 @@ with col1:
     fig.update_layout(
         height=600,
         title=f'{selected_country} Market Performance (Last {lookback_days} days)',
-        showlegend=True
+        showlegend=True,
+        yaxis2=dict(
+            title="FX Rate",
+            overlaying='y',
+            side='right',
+            anchor='x',
+            showgrid=False
+        )
     )
     
     st.plotly_chart(fig, use_container_width=True)
