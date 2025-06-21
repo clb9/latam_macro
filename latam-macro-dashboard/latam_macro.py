@@ -271,4 +271,4 @@ with mcol3:
 
 # Footer
 st.markdown("---")
-st.markdown(f"*Data from Yahoo Finance & Google Trends. Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*") 
+st.markdown(f"*Data from Yahoo Finance & Google Trends. Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
