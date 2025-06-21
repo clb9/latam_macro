@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import warnings
 from pytrends.request import TrendReq
 import time
-warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
@@ -137,18 +136,47 @@ def download_market_data(ticker, period_days):
 
 @st.cache_data(ttl=3600)
 def get_google_trends(keywords, period_days):
-    # Add a timeout and retries to handle potential connection issues on cloud servers
-    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2, backoff_factor=0.1)
-    try:
-        pytrends.build_payload(keywords, cat=0, timeframe=f'today {period_days}-d', geo='', gprop='')
-        trends_df = pytrends.interest_over_time()
-        # Ensure we get more than one data point to be useful
-        if not trends_df.empty and len(trends_df) > 1:
-            return trends_df[keywords]
+    """
+    Fetches Google Trends data for a list of keywords, one by one, to improve reliability.
+    """
+    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=3, backoff_factor=0.5)
+    all_trends_dfs = []
+    
+    for keyword in keywords:
+        try:
+            pytrends.build_payload([keyword], cat=0, timeframe=f'today {period_days}-d', geo='', gprop='')
+            trend_df = pytrends.interest_over_time()
+            
+            if trend_df.empty:
+                continue
+
+            if 'isPartial' in trend_df.columns:
+                trend_df.drop(columns=['isPartial'], inplace=True)
+            
+            all_trends_dfs.append(trend_df)
+            time.sleep(1) # Pause between requests to avoid being rate-limited
+
+        except Exception:
+            # Silently ignore keywords that fail.
+            continue
+            
+    if not all_trends_dfs:
         return None
-    except Exception as e:
-        # Silently fail for trends data as it's non-essential
-        # st.warning(f"Could not retrieve Google Trends data. Error: {e}")
+        
+    try:
+        # Combine the dataframes; they should share the same date index.
+        final_df = pd.concat(all_trends_dfs, axis=1)
+        
+        # Google Trends can return data with duplicate columns if keywords are similar (e.g., 'dolar' and 'dólar')
+        final_df = final_df.loc[:,~final_df.columns.duplicated()]
+
+        if not final_df.empty and len(final_df) > 1:
+            return final_df
+        else:
+            return None
+            
+    except Exception:
+        # If concatenation fails for any reason.
         return None
 
 # Download all data
