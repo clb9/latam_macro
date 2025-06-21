@@ -67,7 +67,7 @@ countries = {
         'currency': 'BRL=X',
         'local_equity': '^BVSP',
         'cds_ticker': 'BRAZIL_CDS',  # Placeholder
-        'elections': ['2024-10-06'],  # Example election dates
+        'elections': ['2026-10-04'],
         'color': '#009c3b'
     },
     'Mexico': {
@@ -75,7 +75,7 @@ countries = {
         'currency': 'MXN=X',
         'local_equity': '^MXX',
         'cds_ticker': 'MEXICO_CDS',
-        'elections': ['2024-06-02'],
+        'elections': ['2030-06-02'],
         'color': '#006847'
     },
     'Chile': {
@@ -93,6 +93,14 @@ countries = {
         'cds_ticker': 'ARGENTINA_CDS',
         'elections': ['2025-10-26'],
         'color': '#75aadb'
+    },
+    'Peru': {
+        'equity': 'EPU',
+        'currency': 'PEN=X',
+        'local_equity': '^SPBLPGPT', # S&P/BVL Peru General TR PEN Index
+        'cds_ticker': 'PERU_CDS',
+        'elections': ['2026-04-12'],
+        'color': '#D91023'
     }
 }
 
@@ -342,63 +350,67 @@ with col2:
     st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
     st.info(f"**Trade Idea:** {trade_idea}")
 
-# Model 2: Momentum Model (Framework)
-st.markdown('<h2 class="model-header">📊 Momentum Model</h2>', unsafe_allow_html=True)
+# Model 2: Short-Term Performance & Risk
+st.markdown('<h2 class="model-header">⚡️ Short-Term Performance & Risk</h2>', unsafe_allow_html=True)
+st.markdown("""
+This model provides a snapshot of recent market performance and highlights potential political risk factors. 
+- **Market Performance** tracks the 5-day price change to gauge immediate market direction.
+- **Political Risk Indicators** are placeholders for future data like polling trends and CDS spreads, which are key drivers of the "Surprise Index" you outlined.
+""")
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.markdown('<h4>📈 Momentum Indicators</h4>', unsafe_allow_html=True)
+    st.markdown('<h4>📈 Market Performance</h4>', unsafe_allow_html=True)
     
     # Calculate momentum indicators
     df['Equity_Momentum'] = df['Equity_Price'].pct_change(5)  # 5-day momentum
     df['FX_Momentum'] = df['FX_Price'].pct_change(5)
-    df['Volatility_Ratio'] = df['Equity_Volatility'] / df['FX_Volatility']
     
     # Current momentum values
     current_equity_momentum = df['Equity_Momentum'].iloc[-1] * 100
     current_fx_momentum = df['FX_Momentum'].iloc[-1] * 100
-    current_vol_ratio = df['Volatility_Ratio'].iloc[-1]
     
     st.metric("Equity Momentum (5d)", f"{current_equity_momentum:+.2f}%")
     st.metric("FX Momentum (5d)", f"{current_fx_momentum:+.2f}%")
-    st.metric("Volatility Ratio", f"{current_vol_ratio:.2f}")
     
-    # Placeholder for polling/CDS data
     st.markdown('<h4>🗳️ Political Risk Indicators</h4>', unsafe_allow_html=True)
     st.warning("⚠️ Polling and CDS data integration pending")
-    st.info("Future features: Polling trends, CDS spreads, Google Trends sentiment")
+    st.info("Future features: Polling trends, CDS spreads, Google Trends sentiment.")
 
 with col2:
-    st.markdown('<h4>🎯 Momentum Signals</h4>', unsafe_allow_html=True)
+    st.markdown('<h4>🎯 Performance Signal</h4>', unsafe_allow_html=True)
     
     # Simple momentum signal logic
-    momentum_score = 0
+    performance_score = 0
     if current_equity_momentum > 2:
-        momentum_score += 1
+        performance_score += 1
     elif current_equity_momentum < -2:
-        momentum_score -= 1
+        performance_score -= 1
     
     if current_fx_momentum > 1:
-        momentum_score += 1
+        performance_score += 1
     elif current_fx_momentum < -1:
-        momentum_score -= 1
+        performance_score -= 1
     
-    if momentum_score > 0:
+    if performance_score > 0:
         signal_class = "signal-bullish"
-        signal_text = "🟢 BULLISH MOMENTUM"
-        trade_idea = "Consider long positions, momentum favors upside"
-    elif momentum_score < 0:
+        signal_text = "🟢 BULLISH PERFORMANCE"
+        trade_idea = "Recent performance has been positive. Investigate for trend continuation."
+    elif performance_score < 0:
         signal_class = "signal-bearish"
-        signal_text = "🔴 BEARISH MOMENTUM"
-        trade_idea = "Consider short positions, momentum favors downside"
+        signal_text = "🔴 BEARISH PERFORMANCE"
+        trade_idea = "Recent performance has been negative. Investigate for trend continuation."
     else:
         signal_class = "signal-neutral"
-        signal_text = "🟡 NEUTRAL MOMENTUM"
-        trade_idea = "Mixed signals, wait for clearer direction"
+        signal_text = "🟡 NEUTRAL PERFORMANCE"
+        trade_idea = "Mixed signals, no clear short-term direction."
     
     st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
     st.info(f"**Trade Idea:** {trade_idea}")
+    st.markdown("""
+    <small>_**Signal Logic:** This signal is a simple score based on 5-day price changes. It is **not** a formal trading recommendation but a quick indicator of recent market sentiment._</small>
+    """, unsafe_allow_html=True)
 
 # Model 3: Event-Driven Gamma Model
 st.markdown('<h2 class="model-header">🎲 Event-Driven Gamma Model</h2>', unsafe_allow_html=True)
@@ -485,13 +497,13 @@ with col1:
         st.info("No spread signal")
 
 with col2:
-    st.markdown('<h4>📊 Momentum Model</h4>', unsafe_allow_html=True)
-    if momentum_score > 0:
-        st.success("Bullish momentum")
-    elif momentum_score < 0:
-        st.error("Bearish momentum")
+    st.markdown('<h4>⚡️ Performance</h4>', unsafe_allow_html=True)
+    if performance_score > 0:
+        st.success("Positive")
+    elif performance_score < 0:
+        st.error("Negative")
     else:
-        st.info("Neutral momentum")
+        st.info("Neutral")
 
 with col3:
     st.markdown('<h4>🎲 Gamma Model</h4>', unsafe_allow_html=True)
