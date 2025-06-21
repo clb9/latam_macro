@@ -7,6 +7,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import warnings
+from pytrends.request import TrendReq
 warnings.filterwarnings('ignore')
 
 # Page configuration
@@ -68,7 +69,8 @@ countries = {
         'local_equity': '^BVSP',
         'cds_ticker': 'BRAZIL_CDS',  # Placeholder
         'elections': ['2026-10-04'],
-        'color': '#009c3b'
+        'color': '#009c3b',
+        'trends_keywords': ['inflação', 'desemprego', 'Lula']
     },
     'Mexico': {
         'equity': 'EWW', 
@@ -76,7 +78,8 @@ countries = {
         'local_equity': '^MXX',
         'cds_ticker': 'MEXICO_CDS',
         'elections': ['2030-06-02'],
-        'color': '#006847'
+        'color': '#006847',
+        'trends_keywords': ['inflacion', 'nearshoring', 'amlo']
     },
     'Chile': {
         'equity': 'ECH', 
@@ -84,7 +87,8 @@ countries = {
         'local_equity': '^IPSA',
         'cds_ticker': 'CHILE_CDS',
         'elections': ['2025-11-23'],
-        'color': '#d52b1e'
+        'color': '#d52b1e',
+        'trends_keywords': ['inflacion', 'litio', 'Boric']
     },
     'Argentina': {
         'equity': 'ARGT', 
@@ -92,7 +96,8 @@ countries = {
         'local_equity': '^MERV',
         'cds_ticker': 'ARGENTINA_CDS',
         'elections': ['2025-10-26'],
-        'color': '#75aadb'
+        'color': '#75aadb',
+        'trends_keywords': ['inflacion', 'dolar', 'milei']
     },
     'Peru': {
         'equity': 'EPU',
@@ -100,7 +105,8 @@ countries = {
         'local_equity': '^SPBLPGPT', # S&P/BVL Peru General TR PEN Index
         'cds_ticker': 'PERU_CDS',
         'elections': ['2026-04-12'],
-        'color': '#D91023'
+        'color': '#D91023',
+        'trends_keywords': ['inflacion', 'corrupcion', 'Boluarte']
     }
 }
 
@@ -128,11 +134,26 @@ def download_market_data(ticker, period_days):
         st.error(f"Failed to download {ticker}: {e}")
         return None
 
+@st.cache_data(ttl=3600)
+def get_google_trends(keywords, period_days):
+    pytrends = TrendReq(hl='en-US', tz=360)
+    try:
+        pytrends.build_payload(keywords, cat=0, timeframe=f'today {period_days}-d', geo='', gprop='')
+        trends_df = pytrends.interest_over_time()
+        if not trends_df.empty:
+            return trends_df[keywords]
+        return None
+    except Exception as e:
+        # Silently fail for trends data as it's non-essential
+        # st.warning(f"Could not retrieve Google Trends data: {e}")
+        return None
+
 # Download all data
 with st.spinner("Downloading market data..."):
     equity_data = download_market_data(eq_ticker, lookback_days)
     fx_data = download_market_data(fx_ticker, lookback_days)
     local_equity_data = download_market_data(local_eq_ticker, lookback_days)
+    trends_data = get_google_trends(country_data['trends_keywords'], lookback_days)
 
 # Debug information
 st.sidebar.markdown("### 🔍 Debug Info")
@@ -155,6 +176,11 @@ if local_equity_data is not None:
 else:
     st.sidebar.warning("Local equity data download failed or ticker not found.")
 
+if trends_data is not None:
+    st.sidebar.write(f"Trends data shape: {trends_data.shape}")
+else:
+    st.sidebar.warning("Google Trends data failed.")
+    
 if equity_data is None or equity_data.empty or fx_data is None or fx_data.empty:
     st.error("Essential Equity (ETF) or FX data could not be downloaded. Dashboard cannot continue.")
     st.stop()
@@ -350,7 +376,63 @@ with col2:
     st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
     st.info(f"**Trade Idea:** {trade_idea}")
 
-# Model 2: Short-Term Performance & Risk
+# Model 2: Google Trends Sentiment
+st.markdown('<h2 class="model-header">📊 Google Trends Sentiment</h2>', unsafe_allow_html=True)
+
+if trends_data is not None:
+    # Calculate a simple "Public Concern Index"
+    trends_data['Concern_Index'] = trends_data.mean(axis=1)
+    trends_data['Concern_ZScore'] = calculate_zscore(trends_data['Concern_Index'])
+    
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        fig_trends = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Google Search Trends', 'Public Concern Index Z-Score'),
+            vertical_spacing=0.15
+        )
+        for keyword in country_data['trends_keywords']:
+            fig_trends.add_trace(go.Scatter(x=trends_data.index, y=trends_data[keyword], name=keyword), row=1, col=1)
+        
+        fig_trends.add_trace(go.Scatter(x=trends_data.index, y=trends_data['Concern_ZScore'], name='Concern Z-Score', line=dict(color='firebrick')), row=2, col=1)
+        fig_trends.add_hline(y=2, line_dash="dash", line_color="red", row=2, col=1)
+        fig_trends.add_hline(y=-2, line_dash="dash", line_color="green", row=2, col=1)
+        
+        fig_trends.update_layout(height=500, showlegend=True, title_text="Public Interest in Key Topics")
+        st.plotly_chart(fig_trends, use_container_width=True)
+        
+    with col2:
+        current_concern_zscore = trends_data['Concern_ZScore'].iloc[-1]
+        st.markdown('<h4>🎯 Sentiment Analysis</h4>', unsafe_allow_html=True)
+        st.metric("Public Concern Z-Score", f"{current_concern_zscore:.2f}")
+
+        if current_concern_zscore > 1.5:
+            signal_class = "signal-bearish"
+            signal_text = "🔴 HIGH PUBLIC CONCERN"
+            trade_idea = "Heightened public interest in sensitive topics may signal political or economic stress. Potential for volatility."
+        elif current_concern_zscore < -1.5:
+            signal_class = "signal-bullish"
+            signal_text = "🟢 LOW PUBLIC CONCERN"
+            trade_idea = "Public attention on sensitive topics is unusually low, suggesting a stable environment."
+        else:
+            signal_class = "signal-neutral"
+            signal_text = "🟡 NORMAL PUBLIC CONCERN"
+            trade_idea = "Public interest in key topics is within normal ranges."
+
+        st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
+        st.info(f"**Trade Idea:** {trade_idea}")
+        st.markdown(
+            """
+            <small>_**Methodology:** This index measures the intensity of Google searches for key political and economic terms. A high Z-score ( > 1.5) suggests public attention is significantly above average, which can be a leading indicator of market-moving events._</small>
+            """, unsafe_allow_html=True
+        )
+
+else:
+    st.warning("Could not load Google Trends data for this country.")
+
+
+# Model 3: Short-Term Performance & Risk
 st.markdown('<h2 class="model-header">⚡️ Short-Term Performance & Risk</h2>', unsafe_allow_html=True)
 st.markdown("""
 This model provides a snapshot of recent market performance and highlights potential political risk factors. 
@@ -482,9 +564,10 @@ with col2:
     st.metric("Vol Percentile", f"{vol_percentile:.0f}%")
 
 # Summary and recommendations
+# Summary and recommendations
 st.markdown('<h2 class="model-header">📋 Trading Summary</h2>', unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.markdown('<h4>🔄 Spread Model</h4>', unsafe_allow_html=True)
@@ -497,6 +580,19 @@ with col1:
         st.info("No spread signal")
 
 with col2:
+    st.markdown('<h4>📊 Sentiment</h4>', unsafe_allow_html=True)
+    if trends_data is not None:
+        current_concern_zscore = trends_data['Concern_ZScore'].iloc[-1]
+        if current_concern_zscore > 1.5:
+            st.error("High Concern")
+        elif current_concern_zscore < -1.5:
+            st.success("Low Concern")
+        else:
+            st.info("Neutral")
+    else:
+        st.warning("N/A")
+
+with col3:
     st.markdown('<h4>⚡️ Performance</h4>', unsafe_allow_html=True)
     if performance_score > 0:
         st.success("Positive")
@@ -505,7 +601,7 @@ with col2:
     else:
         st.info("Neutral")
 
-with col3:
+with col4:
     st.markdown('<h4>🎲 Gamma Model</h4>', unsafe_allow_html=True)
     if "OPPORTUNITY" in gamma_signal:
         st.success("Gamma opportunity detected")
