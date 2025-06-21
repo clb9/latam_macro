@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 from pytrends.request import TrendReq
 import time
+import requests
 
 # Page configuration
 st.set_page_config(
@@ -109,8 +110,10 @@ local_eq_ticker = country_data['local_equity']
 
 @st.cache_data(ttl=3600)
 def download_market_data(ticker, period_days):
+    session = requests.Session()
+    session.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     try:
-        data = yf.download(ticker, period=f'{period_days}d', progress=False)
+        data = yf.download(ticker, period=f'{period_days}d', progress=False, session=session)
         return data if not data.empty else None
     except Exception:
         return None
