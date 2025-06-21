@@ -224,6 +224,9 @@ def calculate_volatility(returns, window):
     return returns.rolling(window=window).std() * np.sqrt(252)
 
 def calculate_zscore(series, window=20):
+    # Ensure there's enough data for a rolling calculation
+    if len(series.dropna()) < window:
+        return pd.Series(np.nan, index=series.index, name=series.name)
     return (series - series.rolling(window=window).mean()) / series.rolling(window=window).std()
 
 # Process data
