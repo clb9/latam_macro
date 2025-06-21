@@ -1,6 +1,7 @@
-streamlit>=1.28.0
-yfinance>=0.2.18
-pandas>=2.0.0
-numpy>=1.24.0
-plotly>=5.15.0
-pytrends>=4.8.0 
+streamlit==1.33.0
+yfinance==0.2.37
+pandas==2.2.1
+numpy==1.26.4
+plotly==5.20.0
+pytrends==4.9.2
+urllib3==1.26.18 

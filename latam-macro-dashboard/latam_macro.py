@@ -147,8 +147,8 @@ def get_google_trends(keywords, period_days):
             return trends_df[keywords]
         return None
     except Exception as e:
-        # Temporarily show the warning to debug on Streamlit Cloud
-        st.warning(f"Could not retrieve Google Trends data. Error: {e}")
+        # Silently fail for trends data as it's non-essential
+        # st.warning(f"Could not retrieve Google Trends data. Error: {e}")
         return None
 
 # Download all data
