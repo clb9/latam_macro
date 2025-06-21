@@ -8,6 +8,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import warnings
 from pytrends.request import TrendReq
+import time
 warnings.filterwarnings('ignore')
 
 # Page configuration
@@ -136,16 +137,18 @@ def download_market_data(ticker, period_days):
 
 @st.cache_data(ttl=3600)
 def get_google_trends(keywords, period_days):
-    pytrends = TrendReq(hl='en-US', tz=360)
+    # Add a timeout and retries to handle potential connection issues on cloud servers
+    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2, backoff_factor=0.1)
     try:
         pytrends.build_payload(keywords, cat=0, timeframe=f'today {period_days}-d', geo='', gprop='')
         trends_df = pytrends.interest_over_time()
-        if not trends_df.empty:
+        # Ensure we get more than one data point to be useful
+        if not trends_df.empty and len(trends_df) > 1:
             return trends_df[keywords]
         return None
     except Exception as e:
-        # Silently fail for trends data as it's non-essential
-        # st.warning(f"Could not retrieve Google Trends data: {e}")
+        # Temporarily show the warning to debug on Streamlit Cloud
+        st.warning(f"Could not retrieve Google Trends data. Error: {e}")
         return None
 
 # Download all data
