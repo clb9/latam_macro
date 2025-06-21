@@ -3,10 +3,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
-import warnings
+from datetime import datetime
 from pytrends.request import TrendReq
 import time
 
@@ -61,51 +59,36 @@ st.markdown("""
 # Header
 st.markdown('<h1 class="main-header">🌎 Latam Macro Trading Dashboard</h1>', unsafe_allow_html=True)
 
-# Country configuration with more comprehensive data
+# Country configuration
 countries = {
     'Brazil': {
         'equity': 'EWZ', 
         'currency': 'BRL=X',
         'local_equity': '^BVSP',
-        'cds_ticker': 'BRAZIL_CDS',  # Placeholder
-        'elections': ['2026-10-04'],
-        'color': '#009c3b',
         'trends_keywords': ['inflação', 'desemprego', 'Lula']
     },
     'Mexico': {
         'equity': 'EWW', 
         'currency': 'MXN=X',
         'local_equity': '^MXX',
-        'cds_ticker': 'MEXICO_CDS',
-        'elections': ['2030-06-02'],
-        'color': '#006847',
         'trends_keywords': ['inflacion', 'nearshoring', 'amlo']
     },
     'Chile': {
         'equity': 'ECH', 
         'currency': 'CLP=X',
         'local_equity': '^IPSA',
-        'cds_ticker': 'CHILE_CDS',
-        'elections': ['2025-11-23'],
-        'color': '#d52b1e',
         'trends_keywords': ['inflacion', 'litio', 'Boric']
     },
     'Argentina': {
         'equity': 'ARGT', 
         'currency': 'ARS=X',
         'local_equity': '^MERV',
-        'cds_ticker': 'ARGENTINA_CDS',
-        'elections': ['2025-10-26'],
-        'color': '#75aadb',
         'trends_keywords': ['inflacion', 'dolar', 'milei']
     },
     'Peru': {
         'equity': 'EPU',
         'currency': 'PEN=X',
-        'local_equity': '^SPBLPGPT', # S&P/BVL Peru General TR PEN Index
-        'cds_ticker': 'PERU_CDS',
-        'elections': ['2026-04-12'],
-        'color': '#D91023',
+        'local_equity': '^SPBLPGPT',
         'trends_keywords': ['inflacion', 'corrupcion', 'Boluarte']
     }
 }
@@ -122,534 +105,170 @@ eq_ticker = country_data['equity']
 fx_ticker = country_data['currency']
 local_eq_ticker = country_data['local_equity']
 
-# Download data with error handling
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+# --- DATA FETCHING ---
+
+@st.cache_data(ttl=3600)
 def download_market_data(ticker, period_days):
     try:
         data = yf.download(ticker, period=f'{period_days}d', progress=False)
-        if data.empty:
-            return None
-        return data
-    except Exception as e:
-        st.error(f"Failed to download {ticker}: {e}")
+        return data if not data.empty else None
+    except Exception:
         return None
 
 @st.cache_data(ttl=3600)
 def get_google_trends(keywords, period_days):
-    """
-    Fetches Google Trends data for a list of keywords, one by one, to improve reliability.
-    """
     pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=3, backoff_factor=0.5)
     all_trends_dfs = []
-    
     for keyword in keywords:
         try:
             pytrends.build_payload([keyword], cat=0, timeframe=f'today {period_days}-d', geo='', gprop='')
             trend_df = pytrends.interest_over_time()
-            
-            if trend_df.empty:
-                continue
-
-            if 'isPartial' in trend_df.columns:
-                trend_df.drop(columns=['isPartial'], inplace=True)
-            
-            all_trends_dfs.append(trend_df)
-            time.sleep(1) # Pause between requests to avoid being rate-limited
-
+            if not trend_df.empty:
+                if 'isPartial' in trend_df.columns:
+                    trend_df.drop(columns=['isPartial'], inplace=True)
+                all_trends_dfs.append(trend_df)
+            time.sleep(1)
         except Exception:
-            # Silently ignore keywords that fail.
             continue
-            
     if not all_trends_dfs:
         return None
-        
     try:
-        # Combine the dataframes; they should share the same date index.
         final_df = pd.concat(all_trends_dfs, axis=1)
-        
-        # Google Trends can return data with duplicate columns if keywords are similar (e.g., 'dolar' and 'dólar')
         final_df = final_df.loc[:,~final_df.columns.duplicated()]
-
-        if not final_df.empty and len(final_df) > 1:
-            return final_df
-        else:
-            return None
-            
+        return final_df if len(final_df) > 1 else None
     except Exception:
-        # If concatenation fails for any reason.
         return None
 
-# Download all data
 with st.spinner("Downloading market data..."):
     equity_data = download_market_data(eq_ticker, lookback_days)
     fx_data = download_market_data(fx_ticker, lookback_days)
     local_equity_data = download_market_data(local_eq_ticker, lookback_days)
     trends_data = get_google_trends(country_data['trends_keywords'], lookback_days)
 
-# Debug information
-st.sidebar.markdown("### 🔍 Debug Info")
-st.sidebar.write(f"Equity ticker: {eq_ticker}")
-st.sidebar.write(f"FX ticker: {fx_ticker}")
-st.sidebar.write(f"Local equity ticker: {local_eq_ticker}")
-
-if equity_data is not None:
-    st.sidebar.write(f"Equity data shape: {equity_data.shape}")
-else:
-    st.sidebar.error("Equity data download failed")
-
-if fx_data is not None:
-    st.sidebar.write(f"FX data shape: {fx_data.shape}")
-else:
-    st.sidebar.error("FX data download failed")
-
-if local_equity_data is not None:
-    st.sidebar.write(f"Local equity data shape: {local_equity_data.shape}")
-else:
-    st.sidebar.warning("Local equity data download failed or ticker not found.")
-
-if trends_data is not None:
-    st.sidebar.write(f"Trends data shape: {trends_data.shape}")
-else:
-    st.sidebar.warning("Google Trends data failed.")
-    
-if equity_data is None or equity_data.empty or fx_data is None or fx_data.empty:
+if equity_data is None or fx_data is None:
     st.error("Essential Equity (ETF) or FX data could not be downloaded. Dashboard cannot continue.")
     st.stop()
 
-# Data preprocessing
+# --- DATA PROCESSING ---
+
+df = pd.DataFrame(index=equity_data.index)
+df['Equity_Price'] = equity_data['Close']
+df['FX_Price'] = fx_data['Close']
+if local_equity_data is not None and len(local_equity_data) > 5:
+    df['Local_Equity_Price'] = local_equity_data['Close']
+
+df.ffill(inplace=True)
+df.bfill(inplace=True)
+df.dropna(subset=['Equity_Price', 'FX_Price'], inplace=True)
+
+if 'Local_Equity_Price' not in df.columns:
+    df['Local_Equity_Price'] = df['Equity_Price'] # Fallback
+
+# --- CALCULATIONS ---
+
 def calculate_returns(prices):
-    return prices.pct_change().dropna()
+    return prices.pct_change()
 
 def calculate_volatility(returns, window):
+    if len(returns.dropna()) < window:
+        return pd.Series(np.nan, index=returns.index)
     return returns.rolling(window=window).std() * np.sqrt(252)
 
 def calculate_zscore(series, window=20):
-    # Ensure there's enough data for a rolling calculation
     if len(series.dropna()) < window:
-        return pd.Series(np.nan, index=series.index, name=series.name)
+        return pd.Series(np.nan, index=series.index)
     return (series - series.rolling(window=window).mean()) / series.rolling(window=window).std()
 
-# Process data
-# First, perform a hard check for the essential data.
-if equity_data is None or equity_data.empty:
-    st.error("Essential Equity (ETF) data could not be downloaded. Dashboard cannot continue.")
-    st.stop()
-
-# 1. Establish the equity index as the master index for our DataFrame.
-df = pd.DataFrame(index=equity_data.index)
-
-# 2. Add data column by column. This is the most robust method.
-#    Assigning a Series to a DataFrame column automatically aligns by index.
-df['Equity_Price'] = equity_data['Close']
-
-if fx_data is not None and not fx_data.empty:
-    df['FX_Price'] = fx_data['Close']
-
-# Only add local equity data if it has a meaningful number of data points.
-MIN_DATA_POINTS = 5
-if local_equity_data is not None and len(local_equity_data) >= MIN_DATA_POINTS:
-    df['Local_Equity_Price'] = local_equity_data['Close']
-
-# 3. Now that the DataFrame is assembled, fill all missing values.
-#    ffill() propagates the last valid observation forward.
-#    bfill() handles any NaNs that may be left at the very beginning.
-df.ffill(inplace=True)
-df.bfill(inplace=True)
-
-# 4. Defensively ensure required columns exist and are filled.
-if 'FX_Price' not in df.columns:
-    st.error("FX data could not be loaded or aligned. Cannot proceed with analysis.")
-    st.stop()
-    
-if 'Local_Equity_Price' not in df.columns:
-    df['Local_Equity_Price'] = df['Equity_Price'] # Fallback for optional data
-
-# 5. Drop any rows that still have NaNs (this can happen if a ticker's
-#    entire date range is outside the master index).
-df.dropna(inplace=True)
-
-# 6. Final check to ensure we have a usable DataFrame.
-if df.empty:
-    st.error("No overlapping data could be constructed for the selected assets.")
-    st.stop()
-
-# 7. Calculate returns and other metrics. This is now guaranteed to be safe.
 df['Equity_Returns'] = calculate_returns(df['Equity_Price'])
 df['FX_Returns'] = calculate_returns(df['FX_Price'])
-df['Local_Equity_Returns'] = calculate_returns(df['Local_Equity_Price'])
-
-df.dropna(inplace=True)
-
-df['Equity_Volatility'] = calculate_volatility(df['Equity_Returns'], volatility_window)
-df['FX_Volatility'] = calculate_volatility(df['FX_Returns'], volatility_window)
 df['Return_Spread'] = df['Equity_Returns'] - df['FX_Returns']
 df['Spread_ZScore'] = calculate_zscore(df['Return_Spread'])
+df['Equity_Volatility'] = calculate_volatility(df['Equity_Returns'], volatility_window)
+df['FX_Volatility'] = calculate_volatility(df['FX_Returns'], volatility_window)
 
-# Drop NaNs introduced by rolling calculations.
-df.dropna(inplace=True)
+df_cleaned = df.dropna()
 
-if df.empty:
-    st.error("Not enough data to compute metrics after cleaning. Please extend the lookback period.")
-    st.stop()
+# --- UI LAYOUT ---
 
-# Main dashboard layout
+st.markdown(f'<h2 class="model-header">📈 Market Overview - {selected_country}</h2>', unsafe_allow_html=True)
+
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.markdown(f'<h2 class="model-header">📈 Market Overview - {selected_country}</h2>', unsafe_allow_html=True)
-    
-    # Price chart
-    fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=('Price Performance', 'Daily Returns'),
-        vertical_spacing=0.1,
-        row_heights=[0.7, 0.3]
-    )
-    
-    # Price subplot
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['Equity_Price'], name='Equity ETF', line=dict(color='blue')),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['FX_Price'], name='FX Rate', line=dict(color='red')),
-        secondary_y=True,
-        row=1, col=1
-    )
-    
-    # Returns subplot
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['Equity_Returns'], name='Equity Returns', line=dict(color='blue')),
-        row=2, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['FX_Returns'], name='FX Returns', line=dict(color='red')),
-        row=2, col=1
-    )
-    
-    fig.update_layout(
-        height=600,
-        title=f'{selected_country} Market Performance (Last {lookback_days} days)',
-        showlegend=True,
-        yaxis2=dict(
-            title="FX Rate",
-            overlaying='y',
-            side='right',
-            anchor='x',
-            showgrid=False
+    if not df_cleaned.empty:
+        fig_market = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_market.add_trace(go.Scatter(x=df_cleaned.index, y=df_cleaned['Equity_Price'], name='Equity ETF', line=dict(color='blue')), secondary_y=False)
+        fig_market.add_trace(go.Scatter(x=df_cleaned.index, y=df_cleaned['FX_Price'], name='FX Rate', line=dict(color='red')), secondary_y=True)
+        fig_market.update_layout(
+            height=500, title_text=f'Price Performance', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+        fig_market.update_yaxes(title_text="Equity Price (USD)", secondary_y=False)
+        fig_market.update_yaxes(title_text="FX Rate (vs. USD)", secondary_y=True)
+        st.plotly_chart(fig_market, use_container_width=True)
+    else:
+        st.warning("Not enough data for price chart.")
 
 with col2:
     st.markdown('<h3 class="model-header">📊 Key Metrics</h3>', unsafe_allow_html=True)
-    
-    # Current metrics
-    current_equity = df['Equity_Price'].iloc[-1]
-    current_fx = df['FX_Price'].iloc[-1]
-    equity_change = ((current_equity / df['Equity_Price'].iloc[-2]) - 1) * 100
-    fx_change = ((current_fx / df['FX_Price'].iloc[-2]) - 1) * 100
-    
-    st.metric("Equity ETF", f"${current_equity:.2f}", f"{equity_change:+.2f}%")
-    st.metric("FX Rate", f"{current_fx:.4f}", f"{fx_change:+.2f}%")
-    
-    # Volatility metrics
-    current_equity_vol = df['Equity_Volatility'].iloc[-1] * 100
-    current_fx_vol = df['FX_Volatility'].iloc[-1] * 100
-    
-    st.metric("Equity Volatility", f"{current_equity_vol:.1f}%")
-    st.metric("FX Volatility", f"{current_fx_vol:.1f}%")
-
-# Model 1: FX/Equity Spread Model
-st.markdown('<h2 class="model-header">🔄 FX/Equity Spread Model</h2>', unsafe_allow_html=True)
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    # Spread analysis chart
-    fig_spread = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=('Return Spread (Equity - FX)', 'Spread Z-Score'),
-        vertical_spacing=0.1
-    )
-    
-    fig_spread.add_trace(
-        go.Scatter(x=df.index, y=df['Return_Spread'], name='Return Spread', line=dict(color='purple')),
-        row=1, col=1
-    )
-    fig_spread.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
-    
-    fig_spread.add_trace(
-        go.Scatter(x=df.index, y=df['Spread_ZScore'], name='Z-Score', line=dict(color='orange')),
-        row=2, col=1
-    )
-    fig_spread.add_hline(y=2, line_dash="dash", line_color="red", row=2, col=1)
-    fig_spread.add_hline(y=-2, line_dash="dash", line_color="red", row=2, col=1)
-    fig_spread.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
-    
-    fig_spread.update_layout(height=500, showlegend=True)
-    st.plotly_chart(fig_spread, use_container_width=True)
-
-with col2:
-    # Spread model signals
-    current_spread = df['Return_Spread'].iloc[-1]
-    current_zscore = df['Spread_ZScore'].iloc[-1]
-    
-    st.markdown('<h4>📊 Spread Analysis</h4>', unsafe_allow_html=True)
-    st.metric("Current Spread", f"{current_spread:.4f}")
-    st.metric("Z-Score", f"{current_zscore:.2f}")
-    
-    # Generate spread signal
-    if abs(current_zscore) > 2:
-        if current_zscore > 2:
-            signal_class = "signal-bearish"
-            signal_text = "🔴 BEARISH SPREAD SIGNAL"
-            trade_idea = "Short equities, long FX (equities overvalued vs FX)"
-        else:
-            signal_class = "signal-bullish"
-            signal_text = "🟢 BULLISH SPREAD SIGNAL"
-            trade_idea = "Long equities, short FX (equities undervalued vs FX)"
+    if not df_cleaned.empty:
+        st.metric("Equity ETF", f"${df_cleaned['Equity_Price'].iloc[-1]:.2f}")
+        st.metric("FX Rate", f"{df_cleaned['FX_Price'].iloc[-1]:.4f}")
+        st.metric("Equity Volatility", f"{df_cleaned['Equity_Volatility'].iloc[-1]*100:.1f}%")
+        st.metric("FX Volatility", f"{df_cleaned['FX_Volatility'].iloc[-1]*100:.1f}%")
     else:
-        signal_class = "signal-neutral"
-        signal_text = "🟡 NEUTRAL SPREAD"
-        trade_idea = "No significant divergence detected"
-    
+        st.info("No metrics to display.")
+
+# Models
+st.markdown('<hr>', unsafe_allow_html=True)
+mcol1, mcol2, mcol3 = st.columns(3)
+
+with mcol1:
+    st.markdown('<h3 class="model-header">🔄 FX/Equity Spread</h3>', unsafe_allow_html=True)
+    if not df_cleaned.empty:
+        current_zscore = df_cleaned['Spread_ZScore'].iloc[-1]
+        st.metric("Spread Z-Score", f"{current_zscore:.2f}")
+        if abs(current_zscore) > 2:
+            signal_class, signal_text = ("signal-bearish", "Short equities, long FX") if current_zscore > 2 else ("signal-bullish", "Long equities, short FX")
+        else:
+            signal_class, signal_text = "signal-neutral", "No divergence"
+    else:
+        st.metric("Spread Z-Score", "N/A")
+        signal_class, signal_text = "signal-neutral", "Not enough data"
     st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
-    st.info(f"**Trade Idea:** {trade_idea}")
 
-# Model 2: Google Trends Sentiment
-st.markdown('<h2 class="model-header">📊 Google Trends Sentiment</h2>', unsafe_allow_html=True)
-
-if trends_data is not None:
-    # Calculate a simple "Public Concern Index"
-    trends_data['Concern_Index'] = trends_data.mean(axis=1)
-    trends_data['Concern_ZScore'] = calculate_zscore(trends_data['Concern_Index'])
-    
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        fig_trends = make_subplots(
-            rows=2, cols=1,
-            subplot_titles=('Google Search Trends', 'Public Concern Index Z-Score'),
-            vertical_spacing=0.15
-        )
-        for keyword in country_data['trends_keywords']:
-            fig_trends.add_trace(go.Scatter(x=trends_data.index, y=trends_data[keyword], name=keyword), row=1, col=1)
-        
-        fig_trends.add_trace(go.Scatter(x=trends_data.index, y=trends_data['Concern_ZScore'], name='Concern Z-Score', line=dict(color='firebrick')), row=2, col=1)
-        fig_trends.add_hline(y=2, line_dash="dash", line_color="red", row=2, col=1)
-        fig_trends.add_hline(y=-2, line_dash="dash", line_color="green", row=2, col=1)
-        
-        fig_trends.update_layout(height=500, showlegend=True, title_text="Public Interest in Key Topics")
-        st.plotly_chart(fig_trends, use_container_width=True)
-        
-    with col2:
-        current_concern_zscore = trends_data['Concern_ZScore'].iloc[-1]
-        st.markdown('<h4>🎯 Sentiment Analysis</h4>', unsafe_allow_html=True)
-        st.metric("Public Concern Z-Score", f"{current_concern_zscore:.2f}")
-
-        if current_concern_zscore > 1.5:
-            signal_class = "signal-bearish"
-            signal_text = "🔴 HIGH PUBLIC CONCERN"
-            trade_idea = "Heightened public interest in sensitive topics may signal political or economic stress. Potential for volatility."
-        elif current_concern_zscore < -1.5:
-            signal_class = "signal-bullish"
-            signal_text = "🟢 LOW PUBLIC CONCERN"
-            trade_idea = "Public attention on sensitive topics is unusually low, suggesting a stable environment."
+with mcol2:
+    st.markdown('<h3 class="model-header">📊 Sentiment</h3>', unsafe_allow_html=True)
+    if trends_data is not None and not trends_data.empty:
+        trends_data['Concern_Index'] = trends_data.mean(axis=1)
+        trends_data['Concern_ZScore'] = calculate_zscore(trends_data['Concern_Index'])
+        if not trends_data['Concern_ZScore'].dropna().empty:
+            current_concern_zscore = trends_data['Concern_ZScore'].iloc[-1]
+            st.metric("Public Concern Z-Score", f"{current_concern_zscore:.2f}")
+            signal_class, signal_text = ("signal-bearish", "High Public Concern") if current_concern_zscore > 1.5 else ("signal-neutral", "Normal Concern")
         else:
-            signal_class = "signal-neutral"
-            signal_text = "🟡 NORMAL PUBLIC CONCERN"
-            trade_idea = "Public interest in key topics is within normal ranges."
-
-        st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
-        st.info(f"**Trade Idea:** {trade_idea}")
-        st.markdown(
-            """
-            <small>_**Methodology:** This index measures the intensity of Google searches for key political and economic terms. A high Z-score ( > 1.5) suggests public attention is significantly above average, which can be a leading indicator of market-moving events._</small>
-            """, unsafe_allow_html=True
-        )
-
-else:
-    st.warning("Could not load Google Trends data for this country.")
-
-
-# Model 3: Short-Term Performance & Risk
-st.markdown('<h2 class="model-header">⚡️ Short-Term Performance & Risk</h2>', unsafe_allow_html=True)
-st.markdown("""
-This model provides a snapshot of recent market performance and highlights potential political risk factors. 
-- **Market Performance** tracks the 5-day price change to gauge immediate market direction.
-- **Political Risk Indicators** are placeholders for future data like polling trends and CDS spreads, which are key drivers of the "Surprise Index" you outlined.
-""")
-
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.markdown('<h4>📈 Market Performance</h4>', unsafe_allow_html=True)
-    
-    # Calculate momentum indicators
-    df['Equity_Momentum'] = df['Equity_Price'].pct_change(5)  # 5-day momentum
-    df['FX_Momentum'] = df['FX_Price'].pct_change(5)
-    
-    # Current momentum values
-    current_equity_momentum = df['Equity_Momentum'].iloc[-1] * 100
-    current_fx_momentum = df['FX_Momentum'].iloc[-1] * 100
-    
-    st.metric("Equity Momentum (5d)", f"{current_equity_momentum:+.2f}%")
-    st.metric("FX Momentum (5d)", f"{current_fx_momentum:+.2f}%")
-    
-    st.markdown('<h4>🗳️ Political Risk Indicators</h4>', unsafe_allow_html=True)
-    st.warning("⚠️ Polling and CDS data integration pending")
-    st.info("Future features: Polling trends, CDS spreads, Google Trends sentiment.")
-
-with col2:
-    st.markdown('<h4>🎯 Performance Signal</h4>', unsafe_allow_html=True)
-    
-    # Simple momentum signal logic
-    performance_score = 0
-    if current_equity_momentum > 2:
-        performance_score += 1
-    elif current_equity_momentum < -2:
-        performance_score -= 1
-    
-    if current_fx_momentum > 1:
-        performance_score += 1
-    elif current_fx_momentum < -1:
-        performance_score -= 1
-    
-    if performance_score > 0:
-        signal_class = "signal-bullish"
-        signal_text = "🟢 BULLISH PERFORMANCE"
-        trade_idea = "Recent performance has been positive. Investigate for trend continuation."
-    elif performance_score < 0:
-        signal_class = "signal-bearish"
-        signal_text = "🔴 BEARISH PERFORMANCE"
-        trade_idea = "Recent performance has been negative. Investigate for trend continuation."
+            st.metric("Public Concern Z-Score", "N/A")
+            signal_class, signal_text = "signal-neutral", "Not enough data"
     else:
-        signal_class = "signal-neutral"
-        signal_text = "🟡 NEUTRAL PERFORMANCE"
-        trade_idea = "Mixed signals, no clear short-term direction."
-    
+        st.metric("Public Concern Z-Score", "N/A")
+        signal_class, signal_text = "signal-neutral", "Could not load data"
     st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
-    st.info(f"**Trade Idea:** {trade_idea}")
-    st.markdown("""
-    <small>_**Signal Logic:** This signal is a simple score based on 5-day price changes. It is **not** a formal trading recommendation but a quick indicator of recent market sentiment._</small>
-    """, unsafe_allow_html=True)
 
-# Model 3: Event-Driven Gamma Model
-st.markdown('<h2 class="model-header">🎲 Event-Driven Gamma Model</h2>', unsafe_allow_html=True)
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    # Event calendar and volatility analysis
-    st.markdown('<h4>📅 Upcoming Political Events</h4>', unsafe_allow_html=True)
-    
-    # Get upcoming events for selected country
-    upcoming_events = country_data.get('elections', [])
-    
-    if upcoming_events:
-        event_df = pd.DataFrame({
-            'Event': ['Election'] * len(upcoming_events),
-            'Date': upcoming_events,
-            'Days Until': [(datetime.strptime(date, '%Y-%m-%d') - datetime.now()).days for date in upcoming_events]
-        })
-        
-        # Filter for upcoming events only
-        event_df = event_df[event_df['Days Until'] > 0].sort_values('Days Until')
-        
-        if not event_df.empty:
-            st.dataframe(event_df, use_container_width=True)
-            
-            # Gamma opportunity analysis
-            nearest_event_days = event_df['Days Until'].iloc[0]
-            
-            if nearest_event_days <= 30:
-                gamma_signal = "🟢 GAMMA OPPORTUNITY"
-                gamma_class = "signal-bullish"
-                gamma_idea = f"Buy straddles/strangles - {nearest_event_days} days until event"
-            elif nearest_event_days <= 90:
-                gamma_signal = "🟡 MONITOR GAMMA"
-                gamma_class = "signal-neutral"
-                gamma_idea = f"Prepare gamma positions - {nearest_event_days} days until event"
-            else:
-                gamma_signal = "🔴 NO GAMMA OPPORTUNITY"
-                gamma_class = "signal-bearish"
-                gamma_idea = "Too far from events, focus on other strategies"
+with mcol3:
+    st.markdown('<h3 class="model-header">⚡️ Performance</h3>', unsafe_allow_html=True)
+    if len(df_cleaned) > 5:
+        five_day_return = (df_cleaned['Equity_Price'].iloc[-1] / df_cleaned['Equity_Price'].iloc[-6] - 1) * 100
+        st.metric("Equity Momentum (5d)", f"{five_day_return:+.2f}%")
+        if five_day_return > 2:
+            signal_class, signal_text = "signal-bullish", "Positive Momentum"
+        elif five_day_return < -2:
+            signal_class, signal_text = "signal-bearish", "Negative Momentum"
         else:
-            st.info("No upcoming events in the next 365 days")
-            gamma_signal = "🔴 NO GAMMA OPPORTUNITY"
-            gamma_class = "signal-bearish"
-            gamma_idea = "No upcoming events detected"
+            signal_class, signal_text = "signal-neutral", "Neutral"
     else:
-        st.info("No events configured for this country")
-        gamma_signal = "🔴 NO GAMMA OPPORTUNITY"
-        gamma_class = "signal-bearish"
-        gamma_idea = "No events configured"
-
-with col2:
-    st.markdown('<h4>🎯 Gamma Signals</h4>', unsafe_allow_html=True)
-    
-    st.markdown(f'<div class="signal-box {gamma_class}">{gamma_signal}</div>', unsafe_allow_html=True)
-    st.info(f"**Trade Idea:** {gamma_idea}")
-    
-    # Volatility analysis for gamma
-    st.markdown('<h4>📊 Volatility Analysis</h4>', unsafe_allow_html=True)
-    
-    # Calculate implied volatility proxy (using realized vol as approximation)
-    avg_equity_vol = df['Equity_Volatility'].mean() * 100
-    current_equity_vol = df['Equity_Volatility'].iloc[-1] * 100
-    vol_percentile = (df['Equity_Volatility'] < df['Equity_Volatility'].iloc[-1]).mean() * 100
-    
-    st.metric("Avg Equity Vol", f"{avg_equity_vol:.1f}%")
-    st.metric("Current Vol", f"{current_equity_vol:.1f}%")
-    st.metric("Vol Percentile", f"{vol_percentile:.0f}%")
-
-# Summary and recommendations
-# Summary and recommendations
-st.markdown('<h2 class="model-header">📋 Trading Summary</h2>', unsafe_allow_html=True)
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.markdown('<h4>🔄 Spread Model</h4>', unsafe_allow_html=True)
-    if abs(current_zscore) > 2:
-        if current_zscore > 2:
-            st.error("Short equities, long FX")
-        else:
-            st.success("Long equities, short FX")
-    else:
-        st.info("No spread signal")
-
-with col2:
-    st.markdown('<h4>📊 Sentiment</h4>', unsafe_allow_html=True)
-    if trends_data is not None:
-        current_concern_zscore = trends_data['Concern_ZScore'].iloc[-1]
-        if current_concern_zscore > 1.5:
-            st.error("High Concern")
-        elif current_concern_zscore < -1.5:
-            st.success("Low Concern")
-        else:
-            st.info("Neutral")
-    else:
-        st.warning("N/A")
-
-with col3:
-    st.markdown('<h4>⚡️ Performance</h4>', unsafe_allow_html=True)
-    if performance_score > 0:
-        st.success("Positive")
-    elif performance_score < 0:
-        st.error("Negative")
-    else:
-        st.info("Neutral")
-
-with col4:
-    st.markdown('<h4>🎲 Gamma Model</h4>', unsafe_allow_html=True)
-    if "OPPORTUNITY" in gamma_signal:
-        st.success("Gamma opportunity detected")
-    else:
-        st.info("No gamma opportunity")
+        st.metric("Equity Momentum (5d)", "N/A")
+        signal_class, signal_text = "signal-neutral", "Not enough data"
+    st.markdown(f'<div class="signal-box {signal_class}">{signal_text}</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
-st.markdown("*Data source: Yahoo Finance | Last updated: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "*") 
+st.markdown(f"*Data from Yahoo Finance & Google Trends. Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*") 
